@@ -2,21 +2,37 @@
 
 set -euo pipefail
 
-# TODO: Ensure this is the correct GitHub homepage where releases can be downloaded for sonar-scanner.
 GH_REPO="https://github.com/SonarSource/sonar-scanner-cli"
 TOOL_NAME="sonar-scanner"
 TOOL_TEST="sonar-scanner --version"
 
 fail() {
-	echo -e "asdf-$TOOL_NAME: $*"
+	printf "asdf-%s: %s" "${TOOL_NAME}" "$*"
 	exit 1
 }
+
+KERNEL_NAME="$(uname -s)"
+case "${KERNEL_NAME}" in
+	Darwin) OS="macosx" ;;
+	Linux) OS="linux" ;;
+	*) printf "Unknown operating system: %s" "${KERNEL_NAME}"
+	exit 1
+esac
+
+MACHINE="$(uname -m)"
+case "${MACHINE}" in
+	x86_64) ARCHITECTURE="x86_64" ;;
+	aarch64|arm64) ARCHITECTURE="aarch64" ;;
+	armv7l) ARCHITECTURE="arm32-vfp-hflt" ;;
+	*) printf "Unknown machine architecture: %s" "${MACHINE}"
+	exit 1
+esac
 
 curl_opts=(-fsSL)
 
 # NOTE: You might want to remove this if sonar-scanner is not hosted on GitHub releases.
-if [ -n "${GITHUB_API_TOKEN:-}" ]; then
-	curl_opts=("${curl_opts[@]}" -H "Authorization: token $GITHUB_API_TOKEN")
+if [[ -n "${GITHUB_API_TOKEN:-}" ]]; then
+	curl_opts=("${curl_opts[@]}" -H "Authorization: token ${GITHUB_API_TOKEN}")
 fi
 
 sort_versions() {
@@ -25,14 +41,12 @@ sort_versions() {
 }
 
 list_github_tags() {
-	git ls-remote --tags --refs "$GH_REPO" |
+	git ls-remote --tags --refs "${GH_REPO}" |
 		grep -o 'refs/tags/.*' | cut -d/ -f3- |
-		sed 's/^v//' # NOTE: You might want to adapt this sed to remove non-version strings from tags
+		sed 's/^v//'
 }
 
 list_all_versions() {
-	# TODO: Adapt this. By default we simply list the tag names from GitHub releases.
-	# Change this function if sonar-scanner has other means of determining installable versions.
 	list_github_tags
 }
 
@@ -41,11 +55,10 @@ download_release() {
 	version="$1"
 	filename="$2"
 
-	# TODO: Adapt the release URL convention for sonar-scanner
-	url="$GH_REPO/archive/v${version}.tar.gz"
+	url="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${version}-${OS}-${ARCHITECTURE}.zip"
 
-	echo "* Downloading $TOOL_NAME release $version..."
-	curl "${curl_opts[@]}" -o "$filename" -C - "$url" || fail "Could not download $url"
+	printf "* Downloading %s release %s..." "${TOOL_NAME}" "${version}"
+	curl "${curl_opts[@]}" -o "${filename}" -C - "${url}" || fail "Could not download $url"
 }
 
 install_version() {
@@ -53,22 +66,23 @@ install_version() {
 	local version="$2"
 	local install_path="${3%/bin}/bin"
 
-	if [ "$install_type" != "version" ]; then
-		fail "asdf-$TOOL_NAME supports release installs only"
+	if [[ "${install_type}" != "version" ]]; then
+		fail "asdf-${TOOL_NAME} supports release installs only"
 	fi
 
 	(
-		mkdir -p "$install_path"
-		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path"
+		mkdir -p "${install_path}"
+		# shellcheck disable=SC2154  # ASDF_DOWNLOAD_PATH is set by asdf
+		cp -r "${ASDF_DOWNLOAD_PATH}"/* "${install_path}"
 
 		# TODO: Assert sonar-scanner executable exists.
 		local tool_cmd
-		tool_cmd="$(echo "$TOOL_TEST" | cut -d' ' -f1)"
-		test -x "$install_path/$tool_cmd" || fail "Expected $install_path/$tool_cmd to be executable."
+		tool_cmd="$(echo "${TOOL_TEST}" | cut -d' ' -f1)"
+		test -x "${install_path}/${tool_cmd}" || fail "Expected ${install_path}/${tool_cmd} to be executable."
 
-		echo "$TOOL_NAME $version installation was successful!"
+		printf "%s %s installation was successful!" "${TOOL_NAME}" "${version}"
 	) || (
-		rm -rf "$install_path"
-		fail "An error occurred while installing $TOOL_NAME $version."
+		rm -rf "${install_path}"
+		fail "An error occurred while installing ${TOOL_NAME} ${version}."
 	)
 }
